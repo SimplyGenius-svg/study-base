@@ -76,8 +76,19 @@ export default function Home() {
       
       const data = await response.json();
       
-      if (data.success) {
-        setResults(data);
+      if (data.searchResults && data.analysis) {
+        setResults({
+          success: true,
+          summary: data.analysis.summary,
+          concepts: data.analysis.concepts,
+          keyPoints: data.analysis.keyPoints,
+          resources: data.searchResults,
+          stats: {
+            totalResources: data.searchResults.length,
+            conceptsFound: data.analysis.concepts.length,
+            searchTermsUsed: data.analysis.searchTerms?.length || 0,
+          }
+        });
       } else {
         throw new Error(data.message || 'Search failed');
       }

@@ -37,7 +37,7 @@ interface AIAnalysis {
 }
 
 // Mapping from course code prefix to department name
-export const prefixToDepartment: Record<string, string> = {
+const prefixToDepartment: Record<string, string> = {
   Anthro: 'Anthropology',
   AAS: 'Asian American Studies Program',
   Astro: 'Astronomy',
@@ -118,11 +118,11 @@ function extractCourseInfo(prompt: string): {
   resourceTypes: string[];
   allTerms: string[];
 } {
-  const courseCodes: string[] = [];
+  let courseCodes: string[] = [];
   const departments: string[] = [];
   const prefixes: string[] = [];
   const resourceTypes: string[] = [];
-  const allTerms: string[] = [];
+  let allTerms: string[] = [];
 
   // Extract full course codes (e.g., "CS 61A", "MATH 1A", "Physics 8B")
   const courseMatches = prompt.match(/\b[A-Z]{2,6}\s*\d+[A-Z]?\b/gi);
@@ -150,6 +150,18 @@ function extractCourseInfo(prompt: string): {
       allTerms.push(num);
     });
   }
+
+  // Add underscore and no-space variants for each course code
+  const extraVariants: string[] = [];
+  courseCodes.forEach(code => {
+    if (code.includes(' ')) {
+      const underscore = code.replace(/\s+/g, '_');
+      const nospace = code.replace(/\s+/g, '');
+      extraVariants.push(underscore, nospace);
+    }
+  });
+  courseCodes = Array.from(new Set([...courseCodes, ...extraVariants]));
+  allTerms = Array.from(new Set([...allTerms, ...extraVariants]));
 
   // Look for department names in the prompt
   Object.entries(prefixToDepartment).forEach(([prefix, department]) => {
@@ -217,353 +229,234 @@ function extractCourseInfo(prompt: string): {
 // Enhanced AI analysis function
 async function analyzeWithAI(prompt: string, openai: OpenAI): Promise<AIAnalysis> {
   console.log('🤖 Starting AI analysis for:', prompt);
+  console.time('AI Analysis Duration');
   
-  const completion = await openai.chat.completions.create({
-    model: "gpt-4o-mini", // Using mini for cost efficiency
-    messages: [
-      {
-        role: "system",
-        content: `You are an expert academic assistant specializing in UC Berkeley courses. Analyze study queries and provide:
-        1. A clear, comprehensive summary (2-3 sentences)
-        2. 5 related concepts with their connection type and relevance strength (0.0-1.0)
-        3. 4 key learning points
-        4. Search terms that would help find relevant academic resources
-        
-        Focus on Berkeley course subjects and academic terminology.
-        
-        Format your response as JSON:
-        {
-          "summary": "Clear explanation of the topic...",
-          "concepts": [
-            {
-              "name": "Concept Name",
-              "connection": "How it relates (e.g., 'Fundamental principle', 'Related topic')",
-              "strength": 0.9
-            }
-          ],
-          "keyPoints": [
-            "Important point 1",
-            "Important point 2"
-          ],
-          "searchTerms": ["term1", "term2"]
-        }`
-      },
-      {
-        role: "user",
-        content: `Analyze this UC Berkeley academic query: "${prompt}"`
-      }
-    ],
-    temperature: 0.3,
-    max_tokens: 1000
-  });
-
   try {
-    const response = completion.choices[0].message.content;
-    if (!response) throw new Error('Empty AI response');
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini", // Using mini for cost efficiency
+      messages: [
+        {
+          role: "system",
+          content: `You are an expert academic assistant specializing in UC Berkeley courses. Analyze study queries and provide:
+          1. A clear, comprehensive summary (2-3 sentences)
+          2. 5 related concepts with their connection type and relevance strength (0.0-1.0)
+          3. 4 key learning points
+          4. Search terms that would help find relevant academic resources
+          
+          Focus on Berkeley course subjects and academic terminology.
+          
+          Format your response as JSON:
+          {
+            "summary": "Clear explanation of the topic...",
+            "concepts": [
+              {
+                "id": "unique_concept_id",
+                "name": "Concept Name",
+                "connection": "How it relates to the query",
+                "strength": 0.8
+              }
+            ],
+            "keyPoints": ["Point 1", "Point 2", "Point 3", "Point 4"],
+            "searchTerms": ["term1", "term2", "term3"]
+          }`
+        },
+        {
+          role: "user",
+          content: prompt
+        }
+      ],
+      temperature: 0.7,
+      max_tokens: 1000
+    });
+
+    const content = completion.choices[0].message.content;
+    if (!content) {
+      throw new Error('Empty response from OpenAI API');
+    }
+
+    console.log('📝 AI Response received:', content);
     
-    console.log('🤖 AI response received, parsing...');
+    const analysis = JSON.parse(content);
+    console.log('✅ AI Analysis parsed successfully:', {
+      summaryLength: analysis.summary.length,
+      conceptsCount: analysis.concepts.length,
+      keyPointsCount: analysis.keyPoints.length,
+      searchTermsCount: analysis.searchTerms.length
+    });
     
-    // Extract JSON from response
-    const jsonMatch = response.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error('No JSON found in AI response');
-    
-    const parsed = JSON.parse(jsonMatch[0]);
-    
-    return {
-      summary: parsed.summary || 'Analysis not available',
-      concepts: parsed.concepts?.map((c: any, index: number) => ({
-        id: `concept-${index}`,
-        name: c.name || 'Unknown Concept',
-        connection: c.connection || 'Related topic',
-        strength: Math.min(Math.max(c.strength || 0.5, 0), 1)
-      })) || [],
-      keyPoints: Array.isArray(parsed.keyPoints) ? parsed.keyPoints : [],
-      searchTerms: Array.isArray(parsed.searchTerms) ? parsed.searchTerms : []
-    };
+    console.timeEnd('AI Analysis Duration');
+    return analysis;
   } catch (error) {
-    console.error('🚨 AI parsing error:', error);
-    
-    // Fallback analysis
-    const extractedInfo = extractCourseInfo(prompt);
-    return {
-      summary: `This query relates to ${extractedInfo.departments.join(', ') || 'academic topics'}. Understanding these concepts requires connecting theoretical knowledge with practical applications.`,
-      concepts: [
-        { id: 'concept-1', name: 'Core Principles', connection: 'Fundamental concepts', strength: 0.9 },
-        { id: 'concept-2', name: 'Applications', connection: 'Practical usage', strength: 0.8 },
-        { id: 'concept-3', name: 'Problem Solving', connection: 'Analytical skills', strength: 0.7 },
-        { id: 'concept-4', name: 'Prerequisites', connection: 'Foundation knowledge', strength: 0.6 }
-      ],
-      keyPoints: [
-        'Focus on understanding fundamental principles',
-        'Practice applying concepts to real problems',
-        'Connect theory with practical examples',
-        'Review course prerequisites if needed'
-      ],
-      searchTerms: extractedInfo.allTerms
-    };
+    console.error('❌ Error in AI analysis:', error);
+    console.timeEnd('AI Analysis Duration');
+    throw error;
   }
 }
 
 // Helper: Find resources by concept/term match in metadata
-async function findResourcesByConceptsOrTerms(searchTerms: string[]): Promise<CourseResource[]> {
-  const resources: CourseResource[] = [];
-  const coursesRef = db.collection('courses');
+// (REMOVE THIS FUNCTION, since there is no resources collection)
 
-  // For each term, search for resources in all courses where metadata fields match
-  for (const term of searchTerms) {
-    // Search in resource_type, source, department, and instructor fields
-    const resourceTypeQuery = await coursesRef.where('resources', '!=', null).limit(10).get();
-    for (const courseDoc of resourceTypeQuery.docs) {
-      const courseData = courseDoc.data();
-      try {
-        const resourcesQuery = await courseDoc.ref.collection('resources').limit(10).get();
-        resourcesQuery.docs.forEach(resourceDoc => {
-          const resourceData = resourceDoc.data();
-          // Check if any metadata field matches the term (case-insensitive)
-          const meta = resourceData.metadata || {};
-          const match = [
-            resourceData.resource_type,
-            resourceData.semester,
-            resourceData.year,
-            meta.resource_type,
-            meta.source,
-            meta.department,
-            meta.instructor
-          ].some(
-            v => typeof v === 'string' && v.toLowerCase().includes(term.toLowerCase())
-          );
-          if (match) {
-            resources.push({
-              id: resourceDoc.id,
-              parent_course_id: courseDoc.id,
-              collection_path: `courses/${courseDoc.id}/resources/${resourceDoc.id}`,
-              course_code: courseData.course_code || '',
-              course_name: courseData.course_name || '',
-              department: courseData.department || '',
-              school: courseData.school || 'UC Berkeley',
-              semester: resourceData.semester || '',
-              year: resourceData.year || '',
-              resource_type: resourceData.resource_type || '',
-              resource_url: resourceData.resource_url || '',
-              metadata: resourceData.metadata || {}
-            });
-          }
-        });
-      } catch (e) {
-        // Ignore if no resources subcollection
-      }
-    }
+// Refactored: Only search exams for matched courses
+async function searchCourseExams(prompt: string, searchTerms: string[]): Promise<CourseResource[]> {
+  console.log('🔍 Starting course-title-aligned search...');
+  
+  // Debug Firebase connection
+  try {
+    console.log('🔌 Testing Firebase connection...');
+    const collections = await db.listCollections();
+    console.log('📚 Available collections:', collections.map(c => c.id));
+    
+    // Try to get a single document to test read access
+    const testDoc = await db.collection('courses').limit(1).get();
+    console.log('📄 Database read test:', {
+      success: true,
+      collectionExists: true,
+      documentCount: testDoc.size,
+      empty: testDoc.empty
+    });
+  } catch (error) {
+    console.error('❌ Firebase connection error:', error);
+    throw new Error('Failed to connect to database');
   }
-  return resources;
-}
 
-// Refactored: Use collection group queries for exams and resources
-async function searchCourseResources(prompt: string, searchTerms: string[]): Promise<CourseResource[]> {
-  console.log('🔍 Starting fast collection group search...');
   const extractedInfo = extractCourseInfo(prompt);
-  console.log('🔍 Extracted course info:', extractedInfo);
-  const resourcesMap = new Map<string, CourseResource>();
-  function addResource(doc: any, parentId: string, collectionPath: string, data: any) {
-    if (!resourcesMap.has(doc.id)) {
-      resourcesMap.set(doc.id, {
-        id: doc.id,
-        parent_course_id: parentId,
-        collection_path: collectionPath,
-        course_code: data.course_code || '',
-        course_name: data.course_name || '',
-        department: data.department || '',
-        school: data.school || 'UC Berkeley',
+  console.log('🔍 Search Criteria:', {
+    courseCodes: extractedInfo.courseCodes,
+    departments: extractedInfo.departments,
+    allTerms: extractedInfo.allTerms,
+    searchTerms: searchTerms
+  });
+  
+  const resources: CourseResource[] = [];
+
+  // Normalize course codes for exact matching (remove non-alphanumeric, lowercase)
+  const normalizedCodeVariants = extractedInfo.courseCodes.map(code =>
+    code.replace(/[^a-zA-Z0-9]/g, '').toLowerCase()
+  );
+
+  // 1. Find all courses whose document ID matches exactly (case-insensitive, ignoring underscores/spaces)
+  const coursesSnap = await db.collection('courses').get();
+  console.log(`📚 Total courses in database: ${coursesSnap.docs.length}`);
+  console.log('📋 Sample course IDs in database:', coursesSnap.docs.slice(0, 3).map(doc => doc.id));
+
+  // Flexible matching: match if docIdNormalized equals, ends with, or contains any code variant
+  const matchedCourses = coursesSnap.docs.filter(doc => {
+    const docIdNormalized = doc.id.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+    const matches = normalizedCodeVariants.some(codeVariant =>
+      docIdNormalized === codeVariant ||
+      docIdNormalized.endsWith(codeVariant) ||
+      docIdNormalized.includes(codeVariant)
+    );
+    if (matches) {
+      console.log(`✅ Flexible Document ID match found: ${doc.id}`);
+    } else {
+      console.log(`❌ No flexible match for course ID: ${doc.id}`);
+    }
+    return matches;
+  });
+
+  console.log(`📚 Found ${matchedCourses.length} matching courses by ID`);
+  if (matchedCourses.length > 0) {
+    console.log('🎯 Matched course IDs:', matchedCourses.map(doc => doc.id));
+  }
+
+  // 2. For each matched course, get its exams subcollection
+  for (const courseDoc of matchedCourses) {
+    console.log(`🔍 Fetching exams for course ID: ${courseDoc.id}`);
+    const examsSnap = await courseDoc.ref.collection('exams').get();
+    console.log(`📄 Found ${examsSnap.docs.length} exams for this course`);
+    examsSnap.docs.forEach(examDoc => {
+      const data = examDoc.data();
+      resources.push({
+        id: examDoc.id,
+        parent_course_id: courseDoc.id,
+        collection_path: `courses/${courseDoc.id}/exams/${examDoc.id}`,
+        course_code: courseDoc.id, // Use doc ID as course_code
+        course_name: '', // No name available
+        department: '',
+        school: '',
         semester: data.semester || '',
         year: data.year || '',
-        resource_type: data.resource_type || '',
+        resource_type: data.resource_type || (data.metadata?.resource_type || ''),
         resource_url: data.resource_url || '',
         metadata: data.metadata || {}
       });
-    }
-  }
-  // Helper to check if a resource matches both subject and number
-  function matchesSubjectAndNumber(data: any, subject: string, number: string) {
-    const code = (data.course_code || '').toLowerCase();
-    const name = (data.course_name || '').toLowerCase();
-    return (
-      (code.includes(subject.toLowerCase()) && code.includes(number.toLowerCase())) ||
-      (name.includes(subject.toLowerCase()) && name.includes(number.toLowerCase()))
-    );
-  }
-  // 1. Search exams by course_code and course_name
-  const subject = extractedInfo.departments.length > 0 ? extractedInfo.departments[0] : '';
-  const numberCodes = extractedInfo.courseCodes.filter(code => /\d+[A-Z]?/i.test(code));
-  if (numberCodes.length > 0 && subject) {
-    const examsQuery = db.collectionGroup('exams');
-    const examsSnap = await examsQuery.get();
-    examsSnap.docs.forEach(doc => {
-      const data = doc.data();
-      // Only match if both subject and number are present
-      for (const number of numberCodes) {
-        if (matchesSubjectAndNumber(data, subject, number)) {
-          const parentId = doc.ref.parent.parent?.id || '';
-          addResource(doc, parentId, doc.ref.path, data);
-          return;
-        }
-      }
-    });
-  } else if (extractedInfo.courseCodes.length > 0 || extractedInfo.allTerms.length > 0) {
-    // Fallback to previous logic if no number/subject combo
-    const examsQuery = db.collectionGroup('exams');
-    const examsSnap = await examsQuery.get();
-    examsSnap.docs.forEach(doc => {
-      const data = doc.data();
-      const codeMatch = extractedInfo.courseCodes.some(code =>
-        (data.course_code || '').toLowerCase().includes(code.toLowerCase())
-      );
-      const nameMatch = extractedInfo.allTerms.some(term =>
-        (data.course_name || '').toLowerCase().includes(term.toLowerCase())
-      );
-      if (codeMatch || nameMatch) {
-        const parentId = doc.ref.parent.parent?.id || '';
-        addResource(doc, parentId, doc.ref.path, data);
-      }
     });
   }
-  // 2. Search resources by course_code and course_name (same logic as above)
-  if (numberCodes.length > 0 && subject) {
-    const resourcesQuery = db.collectionGroup('resources');
-    const resourcesSnap = await resourcesQuery.get();
-    resourcesSnap.docs.forEach(doc => {
-      const data = doc.data();
-      for (const number of numberCodes) {
-        if (matchesSubjectAndNumber(data, subject, number)) {
-          const parentId = doc.ref.parent.parent?.id || '';
-          addResource(doc, parentId, doc.ref.path, data);
-          return;
-        }
-      }
-    });
-  } else if (extractedInfo.courseCodes.length > 0 || extractedInfo.allTerms.length > 0) {
-    const resourcesQuery = db.collectionGroup('resources');
-    const resourcesSnap = await resourcesQuery.get();
-    resourcesSnap.docs.forEach(doc => {
-      const data = doc.data();
-      const codeMatch = extractedInfo.courseCodes.some(code =>
-        (data.course_code || '').toLowerCase().includes(code.toLowerCase())
-      );
-      const nameMatch = extractedInfo.allTerms.some(term =>
-        (data.course_name || '').toLowerCase().includes(term.toLowerCase())
-      );
-      if (codeMatch || nameMatch) {
-        const parentId = doc.ref.parent.parent?.id || '';
-        addResource(doc, parentId, doc.ref.path, data);
-      }
-    });
+
+  console.log(`🔍 Found ${resources.length} total exams from matched courses`);
+  if (resources.length > 0) {
+    console.log('📚 Sample resources found:', resources.slice(0, 3).map(resource => ({
+      course_code: resource.course_code,
+      resource_type: resource.resource_type,
+      year: resource.year
+    })));
   }
-  // 3. Also include recommended resources by AI concepts/terms as before
-  if (searchTerms && searchTerms.length > 0) {
-    const recommended = await findResourcesByConceptsOrTerms(searchTerms);
-    for (const rec of recommended) {
-      if (!resourcesMap.has(rec.id)) {
-        resourcesMap.set(rec.id, rec);
-      }
-    }
-  }
-  const resources = Array.from(resourcesMap.values());
-  console.log(`🔍 Found ${resources.length} total resources (including recommendations)`);
-  // Sort by relevance: exact match > concept/term match > fallback
-  resources.sort((a, b) => {
-    const aExact = extractedInfo.courseCodes.includes(a.course_code);
-    const bExact = extractedInfo.courseCodes.includes(b.course_code);
-    if (aExact && !bExact) return -1;
-    if (!aExact && bExact) return 1;
-    // Prefer resources that match search terms in metadata
-    const aMeta = Object.values(a.metadata || {}).join(' ').toLowerCase();
-    const bMeta = Object.values(b.metadata || {}).join(' ').toLowerCase();
-    const aTerm = searchTerms.some(term => aMeta.includes(term.toLowerCase()));
-    const bTerm = searchTerms.some(term => bMeta.includes(term.toLowerCase()));
-    if (aTerm && !bTerm) return -1;
-    if (!aTerm && bTerm) return 1;
-    // Then by year (newest first)
-    return b.year.localeCompare(a.year);
-  });
-  return resources;
+
+  // Sort by year (newest first)
+  resources.sort((a, b) => b.year.localeCompare(a.year));
+  // Limit to 15 resources
+  return resources.slice(0, 15);
 }
 
 // Move the POST export to the end of the file, after all function definitions
 export async function POST(req: NextRequest) {
-  console.log('🚀 API route hit: /api/search');
+  console.log('🚀 API Route called');
+  console.time('Total Request Duration');
+  
   try {
-    // Validate OpenAI API key
-    if (!process.env.OPENAI_API_KEY) {
-      console.error('❌ OpenAI API key missing');
-      return NextResponse.json(
-        { error: 'OpenAI API key not configured' },
-        { status: 500 }
-      );
-    }
-    // Parse request body
     const body = await req.json();
-    const { prompt } = body;
-    if (!prompt || typeof prompt !== 'string' || prompt.trim().length === 0) {
-      console.error('❌ Invalid prompt');
-      return NextResponse.json(
-        { error: 'Valid prompt is required' },
-        { status: 400 }
-      );
+    console.log('📦 Request body:', {
+      prompt: body.prompt?.substring(0, 100) + '...',
+      hasFilters: !!body.filters,
+      filterCount: Object.keys(body.filters || {}).length
+    });
+
+    if (!body.prompt || typeof body.prompt !== 'string') {
+      console.error('❌ Missing or invalid prompt in request');
+      return NextResponse.json({ error: 'Valid prompt is required' }, { status: 400 });
     }
-    console.log('🔎 Processing search for:', prompt);
+
+    // Extract course information
+    console.time('Course Info Extraction');
+    const courseInfo = extractCourseInfo(body.prompt);
+    console.log('📚 Extracted course info:', courseInfo);
+    console.timeEnd('Course Info Extraction');
+
     // Initialize OpenAI
     const openai = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY,
+      apiKey: process.env.OPENAI_API_KEY
     });
-    // Test Firebase connection
-    try {
-      const testQuery = await db.collection('courses').limit(1).get();
-      if (testQuery.empty) {
-        console.warn('⚠️ No courses found in collection');
-      } else {
-        console.log('✅ Firebase courses collection accessible');
-      }
-    } catch (error) {
-      console.error('❌ Firebase connection failed:', error);
-      return NextResponse.json(
-        { error: 'Database connection failed' },
-        { status: 500 }
-      );
-    }
-    // Extract course information first
-    const extractedInfo = extractCourseInfo(prompt);
-    console.log('📋 Extracted course info:', extractedInfo);
-    // Run AI analysis and Firebase search in parallel
-    console.log('⚡ Starting parallel processing...');
-    const [aiAnalysis, resources] = await Promise.all([
-      analyzeWithAI(prompt, openai),
-      searchCourseResources(prompt, extractedInfo.allTerms)
-    ]);
+
+    // Get AI analysis
+    console.time('AI Analysis');
+    const analysis = await analyzeWithAI(body.prompt, openai);
+    console.timeEnd('AI Analysis');
+
+    // Search for course exams
+    console.time('Course Search');
+    const searchResults = await searchCourseExams(body.prompt, analysis.searchTerms);
+    console.log('🔍 Search results count:', searchResults.length);
+    console.timeEnd('Course Search');
+
     // Prepare response
     const response = {
-      success: true,
-      query: prompt,
-      summary: aiAnalysis.summary,
-      concepts: aiAnalysis.concepts,
-      keyPoints: aiAnalysis.keyPoints,
-      resources: resources.slice(0, 12), // Limit to 12 for UI
-      extractedInfo: extractedInfo, // Include extracted course info for debugging
-      stats: {
-        totalResources: resources.length,
-        conceptsFound: aiAnalysis.concepts.length,
-        coursesDetected: extractedInfo.courseCodes.length,
-        departmentsDetected: extractedInfo.departments.length
-      }
+      analysis,
+      searchResults,
+      courseInfo
     };
-    console.log('✅ Search completed successfully');
-    console.log('📊 Stats:', response.stats);
+
+    console.log('✅ Request completed successfully');
+    console.timeEnd('Total Request Duration');
+    
     return NextResponse.json(response);
-  } catch (error) {
-    console.error('💥 Search error:', error);
+  } catch (error: unknown) {
+    console.error('❌ Error in API route:', error);
+    console.timeEnd('Total Request Duration');
     return NextResponse.json(
       { 
-        success: false,
-        error: 'Search failed',
-        message: error instanceof Error ? error.message : 'Unknown error',
-        details: process.env.NODE_ENV === 'development' ? error : undefined
+        error: 'Internal server error', 
+        details: error instanceof Error ? error.message : 'Unknown error'
       },
       { status: 500 }
     );
