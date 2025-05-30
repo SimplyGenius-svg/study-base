@@ -299,7 +299,7 @@ export default function Home() {
               </div>
               {!results && (
                 <p className="text-sm text-gray-500 mt-2">
-                  Join thousands of students using StudyBase
+                  made with ❤️ by <a href="https://www.linkedin.com/in/gyanbhambhani" className="text-blue-600 hover:underline">gyan</a> and <a href="https://www.linkedin.com/in/aarushi-thaker-77a074207/" className="text-blue-600 hover:underline">aarushi</a> 
                 </p>
               )}
             </form>
